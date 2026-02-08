@@ -2,11 +2,6 @@ import type { ReactNode } from 'react';
 import { useNavigate, Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
 import {
-    LayoutDashboard,
-    Users,
-    HandCoins,
-    History,
-    FileText,
     LogOut,
     Menu,
     X,

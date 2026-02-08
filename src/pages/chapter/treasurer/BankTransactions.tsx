@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../../../lib/supabase';
 import { useAuth } from '../../../hooks/useAuth';
 import { DashboardLayout } from '../../../components/layout/DashboardLayout';
-import { BarChart3, CheckCircle2, Landmark, ArrowRightLeft, FileSpreadsheet, Loader2, Plus, ArrowUpRight, ArrowDownLeft } from 'lucide-react';
+import { BarChart3, CheckCircle2, Landmark, ArrowRightLeft, FileSpreadsheet, Loader2, ArrowUpRight, ArrowDownLeft } from 'lucide-react';
 import { Card, CardContent, Table, TableHeader, TableRow, TableHeaderCell, TableCell } from '../../../components/ui/DataDisplay';
 import { Button } from '../../../components/ui/Button';
 import { Combobox } from '../../../components/ui/Combobox';

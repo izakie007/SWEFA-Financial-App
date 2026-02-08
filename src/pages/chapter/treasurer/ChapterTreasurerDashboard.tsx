@@ -6,13 +6,11 @@ import {
     BarChart3,
     CheckCircle2,
     AlertTriangle,
-    TrendingUp,
     ArrowRightLeft,
     Landmark,
     FileSpreadsheet
 } from 'lucide-react';
 import { Card, CardContent } from '../../../components/ui/DataDisplay';
-import { Button } from '../../../components/ui/Button';
 import { formatCurrency } from '../../../lib/formatters';
 
 const navItems = [
