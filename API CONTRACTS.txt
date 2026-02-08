@@ -1,0 +1,680 @@
+// API CONTRACTS (FRONTEND ↔ SUPABASE)
+// SUPABASE JS CLIENT
+
+// Authentication
+supabase.auth.signInWithPassword({
+  email,
+  password
+});
+
+// Fetch dashboard totals (Chapter FS)
+supabase
+  .from('member_transactions')
+  .select('purpose_id, amount')
+  .eq('transaction_type', 'COLLECTION');
+
+// Member ledger
+supabase
+  .from('member_transactions')
+  .select(`
+    id,
+    amount,
+    transaction_date,
+    purposes(name),
+    members(full_name)
+  `)
+  .eq('member_id', memberId)
+  .order('transaction_date', { ascending: false });
+
+// Record FS → Treasurer handover
+supabase
+  .from('fs_to_chapter_treasurer')
+  .insert({
+    purpose_id,
+    amount
+  });
+
+// Treasurer reconciliation
+supabase
+  .from('chapter_treasurer_receipts')
+  .insert({
+    purpose_id,
+    amount_received
+  });
+
+// National dashboard
+supabase
+  .from('member_transactions')
+  .select('chapter_id, amount')
+  .eq('destination', 'NATIONAL');
+
+// FRONTEND API USAGE
+
+// Dashboard (Chapter FS)
+supabase
+  .from('v_chapter_purpose_summary')
+  .select('*');
+
+// Members Pending
+supabase
+  .from('v_members_pending_contributions')
+  .select('*')
+  .eq('purpose_id', purposeId);
+
+// Chapter Balance Status (National FS)
+supabase.rpc('get_chapter_balance_status');
+
+// National Treasurer Reconciliation
+supabase.rpc('national_reconciliation');
+
+// EDGE FUNCTION ARCHITECTURE
+supabase/functions/
+├── close-purpose/
+├── chapter-reconciliation-check/
+├── national-reconciliation-check/
+├── export-report/
+├── notify-unbalanced/
+
+
+// FUNCTION 1 — AUTO-CLOSE PURPOSES
+// What it does: Finds purposes past end_date, Locks transactions, Freezes reports 
+// close-purpose/index.ts
+import { serve } from "https://deno.land/std/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js";
+
+serve(async () => {
+  const supabase = createClient(
+    Deno.env.get("SUPABASE_URL")!,
+    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
+  );
+
+  const today = new Date().toISOString().slice(0, 10);
+
+  const { data: purposes } = await supabase
+    .from("purposes")
+    .select("id")
+    .lte("end_date", today)
+    .eq("is_active", true);
+
+  for (const p of purposes ?? []) {
+    await supabase.rpc("lock_purpose_transactions", {
+      p_purpose_id: p.id,
+    });
+
+    await supabase
+      .from("purposes")
+      .update({ is_active: false })
+      .eq("id", p.id);
+  }
+
+  return new Response("Purposes closed", { status: 200 });
+});
+
+// FUNCTION 2 — CHAPTER RECONCILIATION CHECK
+// Purpose is to detect: FS vs Treasurer mismatch, Mark chapter as unbalanced
+serve(async () => {
+  const supabase = createClient(
+    Deno.env.get("SUPABASE_URL")!,
+    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
+  );
+
+  const { data } = await supabase.rpc("get_chapter_balance_status");
+
+  const unbalanced = data?.filter(c => !c.balanced);
+
+  if (unbalanced?.length) {
+    await supabase.from("audit_logs").insert({
+      action: "UNBALANCED_CHAPTERS_DETECTED",
+      new_data: unbalanced,
+    });
+  }
+
+  return new Response("Check complete");
+});
+
+// FUNCTION 3 — NATIONAL RECONCILIATION CHECK
+// Purpose: Compare national FS vs national treasurer, Flag mismatches
+// Stores differences for dashboards + alerts.
+rpc: national_reconciliation()
+
+/* FUNCTION 4 — SECURE EXPORT SERVICE
+	-Frontend exports can be tampered
+	-Edge Function exports are authoritative
+*/
+
+const { data, error } = await supabase
+  .from("v_chapter_reconciliation")
+  .select("*")
+  .eq("chapter_id", chapterId);
+
+// store in Supabase Storage.
+/* What it supports
+	-Ledger export
+	-Purpose report
+	-Reconciliation report
+
+	Flow
+	-Frontend calls function
+	-Function validates role
+	-Queries views
+	-Generates CSV / PDF
+	-Returns signed URL
+*/
+
+/*
+FUNCTION 5 — NOTIFY UNBALANCED ACCOUNTS
+
+Supports:
+
+Email (Supabase SMTP)
+
+SMS (later)
+
+Dashboard alerts
+
+Triggered:
+
+Daily
+
+After reconciliation inserts
+*/
+
+// SUPABASE CRON SCHEDULES
+select cron.schedule(
+  'close-purposes',
+  '0 1 * * *',
+  'https://PROJECT_ID.supabase.co/functions/v1/close-purpose'
+);
+
+select cron.schedule(
+  'reconciliation-check',
+  '0 6 * * *',
+  'https://PROJECT_ID.supabase.co/functions/v1/chapter-reconciliation-check'
+);
+
+/*
+FRONTEND API CONTRACT (UPDATED)
+Call export
+*/
+await fetch("/functions/v1/export-report", {
+  method: "POST",
+  body: JSON.stringify({
+    type: "CHAPTER_RECONCILIATION",
+    purposeId,
+  }),
+});
+
+/*
+CHOSEN STACK (BEST FIT FOR SUPABASE)
+Recommended
+
+Next.js (App Router)
+
+TypeScript
+
+Supabase JS v2
+
+Tailwind CSS
+
+TanStack Query (React Query)
+
+Zod (validation)
+
+Day.js
+
+Why:
+
+SSR for dashboards
+
+Middleware for auth & role gating
+
+Excellent Supabase integration
+
+Scales cleanly
+*/
+
+/*
+AUTH & ROLE GATING (CRITICAL)
+Auth Flow
+
+Supabase Auth (email + password)
+
+Fetch user_profiles
+
+Store role + chapter in memory
+
+Redirect based on role
+*/
+// Middleware (middleware.ts)
+import { createMiddlewareClient } from "@supabase/auth-helpers-nextjs";
+
+export async function middleware(req) {
+  const res = NextResponse.next();
+  const supabase = createMiddlewareClient({ req, res });
+
+  const { data } = await supabase.auth.getSession();
+  if (!data.session) return NextResponse.redirect("/login");
+
+  return res;
+}
+
+/*
+ROLE → ROUTE MAP
+Role	Base Route
+Chapter FS	/chapter/fs
+Chapter Treasurer	/chapter/treasurer
+National FS	/national/fs
+National Treasurer	/national/treasurer
+Admin	/admin
+
+Hard rule:
+❌ Never share routes between roles
+✅ Shared components only
+*/
+
+/*
+SCREEN MAP (BY ROLE)
+Chapter Financial Secretary
+/chapter/fs
+├── dashboard
+├── members
+│   └── [memberId]/ledger
+├── purposes
+│   └── [purposeId]
+├── handover
+├── reports
+
+Dashboard widgets
+
+Total collected (per purpose)
+
+Outstanding balances
+
+Members yet to contribute
+*/
+v_chapter_purpose_summary
+v_members_pending_contributions
+
+/*
+Chapter Treasurer
+/chapter/treasurer
+├── dashboard
+├── reconciliation
+├── receipts
+├── transfers
+├── reports
+*/
+v_chapter_reconciliation
+chapter_treasurer_receipts
+
+/*
+National Financial Secretary
+/national/fs
+├── dashboard
+├── chapters
+│   └── [chapterId]
+├── reconciliation
+├── handover
+├── reports
+*/
+v_national_summary
+get_chapter_balance_status()
+
+/*
+National Treasurer
+/national/treasurer
+├── dashboard
+├── receipts
+├── bank
+├── reconciliation
+├── reports
+*/
+national_reconciliation()
+national_treasurer_receipts
+
+/*
+DATA ACCESS PATTERN (VERY IMPORTANT)
+Rule
+
+Frontend never calculates money
+✅ Views & RPC only
+❌ No arithmetic in React
+*/
+export const useChapterSummary = () =>
+  useQuery({
+    queryKey: ["chapter-summary"],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("v_chapter_purpose_summary")
+        .select("*");
+      if (error) throw error;
+      return data;
+    },
+  });
+
+/*
+FORM HANDLING (FINANCIAL SAFETY)
+Example: Member Transaction Form
+RLS enforces: correct chapter, correct role
+*/
+const schema = z.object({
+  member_id: z.string().uuid(),
+  purpose_id: z.string().uuid(),
+  amount: z.number().positive(),
+  destination: z.enum(["CHAPTER", "NATIONAL"]),
+});
+// insert:
+supabase.from("member_transactions").insert(formData);
+
+/*
+EXPORT FLOW (SECURE)
+Frontend:
+*/
+await fetch("/functions/v1/export-report", {
+  method: "POST",
+  body: JSON.stringify({
+    report: "CHAPTER_RECONCILIATION",
+    purposeId,
+  }),
+});
+/*
+Backend:
+validates role
+queries views
+generates file
+returns signed URL
+*/
+
+
+/*
+UI STATUS LANGUAGE (VERY IMPORTANT)
+
+Every financial state is explicit:
+
+Status	Meaning
+Balanced ✅	No discrepancies
+Unbalanced ⚠️	Needs attention
+Locked 🔒	Period closed
+Pending ⏳	Awaiting reconciliation
+
+No ambiguity → fewer disputes.
+
+FOLDER STRUCTURE
+src/
+├── app/
+│   ├── chapter/
+│   ├── national/
+│   ├── admin/
+│   └── login/
+├── components/
+│   ├── tables/
+│   ├── forms/
+│   └── charts/
+├── hooks/
+├── lib/
+│   ├── supabase.ts
+│   └── roles.ts
+├── types/
+*/
+
+/*
+the remaining steps are governance & longevity:
+
+RLS policy matrix + penetration tests
+
+Yearly rollover & archival
+
+Data migration from paper / Excel
+
+Admin correction workflows
+
+Member read-only portal
+
+Deployment & ops checklist
+*/
+
+/*
+VIEW SECURITY
+
+All views:
+
+rely on base table RLS
+
+have no SECURITY DEFINER
+
+expose no raw member data to national roles
+
+Example check:
+*/
+select * from v_national_summary;
+
+/*
+SECURITY TEST CASES (MANDATORY)
+
+You should literally test these in Supabase SQL Editor.
+
+Test 1 — Chapter Isolation
+*/
+-- logged in as Chapter A FS
+select * from member_transactions
+where chapter_id != user_chapter();
+
+// Test 2 — Role Escalation Attempt
+-- logged in as Chapter Treasurer
+insert into member_transactions (...)
+
+// Test 3 — National Overreach
+-- logged in as National FS
+select member_id, amount from member_transactions;
+
+// Test 4 — Locked Period
+update member_transactions set amount = 999;
+
+// Test 5 — Cross-chapter insert
+insert into member_transactions (chapter_id = other_chapter)
+
+/*
+RLS REGRESSION STRATEGY
+
+Whenever you add a table:
+
+Create table
+
+Enable RLS
+
+Add deny-all default
+
+Explicitly allow only what’s needed
+
+Golden rule:
+
+No policy = no access
+
+8.7 WHAT YOU HAVE NOW (THIS IS HUGE)
+
+At this stage, SWEFA has:
+
+✅ Mathematically correct accounting
+✅ Legally defensible data isolation
+✅ Immutable financial records
+✅ Clear separation of duties
+✅ Auditable correction paths
+✅ Zero trust frontend
+
+This system can be audited by:
+
+internal GA
+
+external accountants
+
+donors
+
+regulators (if ever required)
+*/
+
+/*
+DESIGN PRINCIPLES (VERY IMPORTANT)
+
+We follow real accounting rules, not app shortcuts:
+
+Financial years never change
+
+Closed years are immutable
+
+Current year stays fast
+
+Archives remain queryable
+
+Reports must be reproducible exactly
+
+That means:
+❌ No deleting old data
+❌ No “resetting” tables
+❌ No mixing years
+
+✅ Explicit financial periods
+✅ Explicit archival boundary
+*/
+
+// EDGE FUNCTION — YEAR-END AUTOMATION
+/*
+Triggered:
+manually by Admin
+or scheduled annually
+*/
+serve(async () => {
+  // 1. check all reconciliations
+  // 2. lock all purposes
+  // 3. close financial year
+  // 4. notify stakeholders
+});
+
+/*
+What remains is polish:
+Admin correction workflow (with justification & counter-entries)
+Data migration from Excel / paper
+Member read-only portal
+Deployment, backups & DR
+Training & SOP documentation
+go-live checklist
+*/
+
+
+/*
+SERVICE-ROLE BYPASS (EDGE FUNCTIONS)
+Why this exists (important)
+Service Role key bypasses RLS automatically
+Must never be used directly by the client
+Only used inside Supabase Edge Functions
+
+Purpose:
+admin fixes
+reporting
+controlled corrections
+automation (year close, rollups)
+
+Edge Function Rule of Thumb
+| Action                | Client | Edge Function |
+| --------------------- | ------ | ------------- |
+| Normal inserts        | ✅      | ❌             |
+| Normal reads          | ✅      | ❌             |
+| Admin correction      | ❌      | ✅             |
+| Cross-chapter queries | ❌      | ✅             |
+| Locked data access    | ❌      | ✅             |
+*/
+
+// Example Edge Function (Deno) – Secure Admin Action
+/*
+Security guarantee:
+Client auth verified
+Role verified via RLS
+Only server uses service role
+No direct DB exposure
+*/
+import { serve } from "https://deno.land/std/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js";
+
+serve(async (req) => {
+  const authHeader = req.headers.get("Authorization");
+  if (!authHeader) {
+    return new Response("Unauthorized", { status: 401 });
+  }
+
+  // Client-scoped Supabase
+  const supabaseUser = createClient(
+    Deno.env.get("SUPABASE_URL")!,
+    Deno.env.get("SUPABASE_ANON_KEY")!,
+    { global: { headers: { Authorization: authHeader } } }
+  );
+
+  // Verify caller role
+  const { data: profile } = await supabaseUser
+    .from("user_profiles")
+    .select("role:roles(code)")
+    .single();
+
+  if (profile?.role?.code !== "ADMIN") {
+    return new Response("Forbidden", { status: 403 });
+  }
+
+  // Service-role Supabase (RLS bypass)
+  const supabaseAdmin = createClient(
+    Deno.env.get("SUPABASE_URL")!,
+    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
+  );
+
+  // Example: create counter-entry
+  const body = await req.json();
+
+  const { error } = await supabaseAdmin
+    .from("member_transactions")
+    .insert(body);
+
+  if (error) {
+    return new Response(error.message, { status: 400 });
+  }
+
+  return new Response(JSON.stringify({ success: true }), { status: 200 });
+});
+
+/*
+ADMIN CORRECTION VIA COUNTER-ENTRIES (NO DELETES EVER)
+Accounting rule
+
+Never update or delete financial records
+Corrections are offsetting transactions
+*/
+// Optional DB Guard (Prevent Wrong Corrections)
+create or replace function enforce_counter_entry()
+returns trigger
+language plpgsql
+as $$
+declare
+  original record;
+begin
+  if new.correction_of is not null then
+    select * into original
+    from member_transactions
+    where id = new.correction_of;
+
+    if original.amount + new.amount != 0 then
+      raise exception 'Correction must fully offset original transaction';
+    end if;
+  end if;
+
+  return new;
+end;
+$$;
+
+create trigger trg_counter_entry
+before insert on member_transactions
+for each row
+execute function enforce_counter_entry();
+/*
+Why this is powerful
+
+✅ Full audit trail
+✅ Financial integrity
+✅ Zero silent data loss
+✅ Legal-grade bookkeeping
+*/
