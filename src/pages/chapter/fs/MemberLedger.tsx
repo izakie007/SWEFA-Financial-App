@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
 import { supabase } from '../../../lib/supabase';
 import { useAuth } from '../../../hooks/useAuth';
 import { DashboardLayout } from '../../../components/layout/DashboardLayout';
@@ -20,6 +21,7 @@ const navItems = [
 
 export default function MemberLedger() {
     const { profile } = useAuth();
+    const navigate = useNavigate();
     const [searchTerm, setSearchTerm] = useState('');
     const [filterPurpose, setFilterPurpose] = useState('ALL');
 
@@ -98,7 +100,7 @@ export default function MemberLedger() {
                                 <Download size={16} />
                                 Export CSV
                             </Button>
-                            <Button size="sm" className="gap-2">
+                            <Button size="sm" className="gap-2" onClick={() => navigate('/chapter/fs/record')}>
                                 <UserPlus size={16} />
                                 Add Record
                             </Button>

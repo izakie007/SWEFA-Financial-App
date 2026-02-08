@@ -46,7 +46,10 @@ export default function RecordTransaction() {
                 .select('id, full_name, membership_number')
                 .eq('chapter_id', profile?.chapter_id)
                 .eq('is_active', true);
-            if (error) throw error;
+            if (error) {
+                console.error('Error fetching members:', error);
+                return [];
+            }
             return data?.map(m => ({ id: m.id, label: `${m.full_name} (${m.membership_number || 'N/A'})` })) || [];
         },
         enabled: !!profile?.chapter_id,
@@ -60,7 +63,10 @@ export default function RecordTransaction() {
                 .from('purposes')
                 .select('id, name, level, expected_amount')
                 .eq('is_active', true);
-            if (error) throw error;
+            if (error) {
+                console.error('Error fetching purposes:', error);
+                return [];
+            }
             return data?.map(p => ({
                 id: p.id,
                 label: `${p.name} ${p.expected_amount ? `(${formatCurrency(p.expected_amount)})` : ''}`

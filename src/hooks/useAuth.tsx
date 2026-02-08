@@ -74,7 +74,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 setProfile({
                     user_id: data.user_id,
                     role_id: data.role_id,
-                    role_code: (data.roles as any)?.code,
+                    role_code: (data.roles as any)?.code || '',
                     chapter_id: data.chapter_id,
                     is_active: data.is_active,
                 });
