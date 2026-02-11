@@ -8,7 +8,8 @@ import {
     AlertTriangle,
     ArrowRightLeft,
     Landmark,
-    FileSpreadsheet
+    FileSpreadsheet,
+    Wallet
 } from 'lucide-react';
 import { Card, CardContent } from '../../../components/ui/DataDisplay';
 import { formatCurrency } from '../../../lib/formatters';
@@ -37,10 +38,74 @@ export default function ChapterTreasurerDashboard() {
         enabled: !!profile?.chapter_id,
     });
 
+    const { data: balances, isLoading: balanceLoading } = useQuery({
+        queryKey: ['treasurer-balances', profile?.chapter_id],
+        queryFn: async () => {
+            const { data, error } = await supabase
+                .from('v_chapter_cash_position')
+                .select('treasurer_cash_balance, bank_balance')
+                .eq('chapter_id', profile?.chapter_id)
+                .single();
+            if (error) throw error;
+            return {
+                cash: data?.treasurer_cash_balance || 0,
+                bank: data?.bank_balance || 0
+            };
+        },
+        enabled: !!profile?.chapter_id,
+    });
+
     const totalDifference = reconSummary?.reduce((acc: number, item: any) => acc + item.difference, 0) || 0;
 
     return (
         <DashboardLayout navItems={navItems} title="Treasurer Dashboard">
+
+            {/* Financial Position */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+                <Card className="bg-primary text-primary-foreground">
+                    <CardContent className="p-6">
+                        <div className="flex items-center justify-between">
+                            <p className="text-sm font-medium opacity-80 uppercase tracking-wider">Cash on Hand</p>
+                            <Wallet className="opacity-80" />
+                        </div>
+                        <div className="mt-2">
+                            {balanceLoading ? (
+                                <div className="h-8 bg-white/20 animate-pulse rounded w-32" />
+                            ) : (
+                                <span className="text-3xl font-bold">
+                                    {formatCurrency(balances?.cash || 0)}
+                                </span>
+                            )}
+                        </div>
+                        <p className="text-xs opacity-70 mt-4">
+                            Available for deposit or transfer
+                        </p>
+                    </CardContent>
+                </Card>
+
+                <Card className="bg-secondary text-secondary-foreground">
+                    <CardContent className="p-6">
+                        <div className="flex items-center justify-between">
+                            <p className="text-sm font-medium opacity-80 uppercase tracking-wider">Bank Balance</p>
+                            <Landmark className="opacity-80" />
+                        </div>
+                        <div className="mt-2">
+                            {balanceLoading ? (
+                                <div className="h-8 bg-white/20 animate-pulse rounded w-32" />
+                            ) : (
+                                <span className="text-3xl font-bold">
+                                    {formatCurrency(balances?.bank || 0)}
+                                </span>
+                            )}
+                        </div>
+                        <p className="text-xs opacity-70 mt-4">
+                            Verified bank account balance
+                        </p>
+                    </CardContent>
+                </Card>
+            </div>
+
+            <h3 className="font-bold text-lg mb-4 text-muted-foreground">Reconciliation Status</h3>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 <Card className={totalDifference === 0 ? 'bg-secondary/10 border-secondary/20' : 'bg-destructive/10 border-destructive/20'}>
                     <CardContent className="p-6">

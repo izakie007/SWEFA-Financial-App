@@ -12,7 +12,9 @@ import {
     ArrowRightLeft,
     FileSpreadsheet,
     Loader2,
-    Send
+    Send,
+    Wallet,
+    AlertCircle
 } from 'lucide-react';
 import { Card, CardContent, Table, TableHeader, TableRow, TableHeaderCell, TableCell } from '../../../components/ui/DataDisplay';
 import { Button } from '../../../components/ui/Button';
@@ -28,19 +30,41 @@ const navItems = [
     { label: 'Reports', path: '/chapter/treasurer/reports', icon: FileSpreadsheet },
 ];
 
-const forwardSchema = z.object({
+const createForwardSchema = (maxAmount: number) => z.object({
     purpose_id: z.string().uuid('Please select a purpose'),
-    amount: z.number().min(1, 'Amount must be greater than 0'),
+    amount: z.number()
+        .min(1, 'Amount must be greater than 0')
+        .max(maxAmount, `Insufficient funds. Available: ${new Intl.NumberFormat('en-CM').format(maxAmount)} XAF`),
     reference_number: z.string().min(1, 'Reference number is required'),
     transfer_date: z.string(),
 });
 
-type ForwardFormValues = z.infer<typeof forwardSchema>;
+type ForwardFormValues = {
+    purpose_id: string;
+    amount: number;
+    reference_number: string;
+    transfer_date: string;
+};
 
 export default function ForwardToNational() {
     const { profile } = useAuth();
     const queryClient = useQueryClient();
     const [success, setSuccess] = useState(false);
+
+    // Fetch Treasurer Cash Balance
+    const { data: cashBalance, isLoading: balanceLoading } = useQuery({
+        queryKey: ['treasurer-cash-balance', profile?.chapter_id],
+        queryFn: async () => {
+            const { data, error } = await supabase
+                .from('v_chapter_cash_position')
+                .select('treasurer_cash_balance')
+                .eq('chapter_id', profile?.chapter_id)
+                .single();
+            if (error) throw error;
+            return data?.treasurer_cash_balance || 0;
+        },
+        enabled: !!profile?.chapter_id,
+    });
 
     // Fetch purposes (only National level ones usually, but let's fetch all active)
     const { data: purposes } = useQuery({
@@ -72,7 +96,7 @@ export default function ForwardToNational() {
     });
 
     const { register, handleSubmit, reset, control, formState: { errors, isSubmitting } } = useForm<ForwardFormValues>({
-        resolver: zodResolver(forwardSchema),
+        resolver: zodResolver(createForwardSchema(cashBalance || 0)),
         defaultValues: {
             transfer_date: new Date().toISOString().split('T')[0],
         }
@@ -105,7 +129,32 @@ export default function ForwardToNational() {
                         <h3 className="text-xl font-bold mb-6 flex items-center gap-2">
                             <Send size={20} className="text-primary" />
                             New Transfer
+                            New Transfer
                         </h3>
+
+                        {/* Cash Balance Display */}
+                        <div className="mb-6 p-4 bg-primary/5 border border-primary/20 rounded-xl">
+                            <div className="flex items-center gap-2 mb-2">
+                                <Wallet size={18} className="text-primary" />
+                                <span className="text-sm font-semibold text-muted-foreground">Available Cash</span>
+                            </div>
+                            {balanceLoading ? (
+                                <div className="h-8 bg-muted animate-pulse rounded w-32" />
+                            ) : (
+                                <p className="text-2xl font-black text-primary">
+                                    {formatCurrency(cashBalance || 0)}
+                                </p>
+                            )}
+                            {cashBalance === 0 && (
+                                <div className="mt-3 p-2 bg-destructive/10 border border-destructive/20 rounded-lg flex items-start gap-2">
+                                    <AlertCircle size={16} className="text-destructive mt-0.5" />
+                                    <p className="text-xs text-destructive">
+                                        No funds available for transfer.
+                                    </p>
+                                </div>
+                            )}
+                        </div>
+
                         {success && (
                             <div className="mb-6 p-4 bg-secondary/10 text-secondary rounded-xl text-sm font-semibold text-center">
                                 Transfer recorded successfully!
@@ -160,7 +209,7 @@ export default function ForwardToNational() {
                                 />
                             </div>
 
-                            <Button type="submit" className="w-full" disabled={isSubmitting}>
+                            <Button type="submit" className="w-full" disabled={isSubmitting || (cashBalance || 0) === 0}>
                                 {isSubmitting ? <Loader2 className="animate-spin" size={24} /> : 'Initiate Forwarding'}
                             </Button>
                         </form>

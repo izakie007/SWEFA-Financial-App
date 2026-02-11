@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { supabase } from '../../../lib/supabase';
 import { useAuth } from '../../../hooks/useAuth';
 import { DashboardLayout } from '../../../components/layout/DashboardLayout';
-import { LayoutDashboard, Users, HandCoins, History, FileText, TrendingUp, AlertCircle } from 'lucide-react';
+import { LayoutDashboard, Users, HandCoins, History, FileText, TrendingUp, AlertCircle, Wallet } from 'lucide-react';
 import { Card, CardContent } from '../../../components/ui/DataDisplay';
 import { Button } from '../../../components/ui/Button';
 import { Link } from 'react-router-dom';
@@ -47,9 +47,43 @@ export default function ChapterFSDashboard() {
         enabled: !!profile?.chapter_id,
     });
 
+    const { data: cashBalance, isLoading: balanceLoading } = useQuery({
+        queryKey: ['fs-cash-balance', profile?.chapter_id],
+        queryFn: async () => {
+            const { data, error } = await supabase
+                .from('v_chapter_cash_position')
+                .select('fs_cash_balance')
+                .eq('chapter_id', profile?.chapter_id)
+                .single();
+            if (error) throw error;
+            return data?.fs_cash_balance || 0;
+        },
+        enabled: !!profile?.chapter_id,
+    });
+
     return (
         <DashboardLayout navItems={navItems} title="Financial Overview">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+                <Card className="bg-primary text-primary-foreground">
+                    <CardContent className="p-6">
+                        <div className="flex items-center justify-between">
+                            <p className="text-sm font-medium opacity-80 uppercase tracking-wider">Cash on Hand</p>
+                            <Wallet className="opacity-80" />
+                        </div>
+                        <div className="mt-2">
+                            {balanceLoading ? (
+                                <div className="h-8 bg-white/20 animate-pulse rounded w-32" />
+                            ) : (
+                                <span className="text-3xl font-bold">
+                                    {formatCurrency(cashBalance || 0)}
+                                </span>
+                            )}
+                        </div>
+                        <p className="text-xs opacity-70 mt-4">
+                            Available for handover
+                        </p>
+                    </CardContent>
+                </Card>
                 {isLoading ? (
                     [1, 2, 3].map((i) => (
                         <div key={i} className="h-32 bg-muted animate-pulse rounded-3xl" />

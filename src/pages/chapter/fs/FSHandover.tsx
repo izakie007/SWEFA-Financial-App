@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../../../lib/supabase';
 import { useAuth } from '../../../hooks/useAuth';
 import { DashboardLayout } from '../../../components/layout/DashboardLayout';
-import { LayoutDashboard, Users, HandCoins, History, FileText, Loader2, CheckCircle2 } from 'lucide-react';
+import { LayoutDashboard, Users, HandCoins, History, FileText, Loader2, CheckCircle2, Wallet, AlertCircle } from 'lucide-react';
 import { Card, CardContent, Table, TableHeader, TableRow, TableHeaderCell, TableCell } from '../../../components/ui/DataDisplay';
 import { Button } from '../../../components/ui/Button';
 import { Combobox } from '../../../components/ui/Combobox';
@@ -21,17 +21,37 @@ const navItems = [
     { label: 'Reports', path: '/chapter/fs/reports', icon: FileText },
 ];
 
-const handoverSchema = z.object({
+const createHandoverSchema = (maxAmount: number) => z.object({
     purpose_id: z.string().uuid('Please select a purpose'),
-    amount: z.number().min(1, 'Amount must be greater than 0'),
+    amount: z.number()
+        .min(1, 'Amount must be greater than 0')
+        .max(maxAmount, `Insufficient funds. Available: ${new Intl.NumberFormat('en-CM').format(maxAmount)} XAF`),
 });
 
-type HandoverFormValues = z.infer<typeof handoverSchema>;
+type HandoverFormValues = {
+    purpose_id: string;
+    amount: number;
+};
 
 export default function FSHandover() {
     const { profile } = useAuth();
     const queryClient = useQueryClient();
     const [success, setSuccess] = useState(false);
+
+    // Fetch FS Cash Balance
+    const { data: cashBalance, isLoading: balanceLoading } = useQuery({
+        queryKey: ['fs-cash-balance', profile?.chapter_id],
+        queryFn: async () => {
+            const { data, error } = await supabase
+                .from('v_chapter_cash_position')
+                .select('fs_cash_balance')
+                .eq('chapter_id', profile?.chapter_id)
+                .single();
+            if (error) throw error;
+            return data?.fs_cash_balance || 0;
+        },
+        enabled: !!profile?.chapter_id,
+    });
 
     // Fetch active purposes
     const { data: purposes } = useQuery({
@@ -62,7 +82,7 @@ export default function FSHandover() {
     });
 
     const { register, handleSubmit, reset, control, formState: { errors, isSubmitting } } = useForm<HandoverFormValues>({
-        resolver: zodResolver(handoverSchema),
+        resolver: zodResolver(createHandoverSchema(cashBalance || 0)),
     });
 
     const mutation = useMutation({
@@ -90,6 +110,30 @@ export default function FSHandover() {
                 <Card className="lg:col-span-1 h-fit">
                     <CardContent className="p-8">
                         <h3 className="text-xl font-bold mb-6">New Handover</h3>
+
+                        {/* Cash Balance Display */}
+                        <div className="mb-6 p-4 bg-primary/5 border border-primary/20 rounded-xl">
+                            <div className="flex items-center gap-2 mb-2">
+                                <Wallet size={18} className="text-primary" />
+                                <span className="text-sm font-semibold text-muted-foreground">Available Cash</span>
+                            </div>
+                            {balanceLoading ? (
+                                <div className="h-8 bg-muted animate-pulse rounded w-32" />
+                            ) : (
+                                <p className="text-2xl font-black text-primary">
+                                    {formatCurrency(cashBalance || 0)}
+                                </p>
+                            )}
+                            {cashBalance === 0 && (
+                                <div className="mt-3 p-2 bg-destructive/10 border border-destructive/20 rounded-lg flex items-start gap-2">
+                                    <AlertCircle size={16} className="text-destructive mt-0.5" />
+                                    <p className="text-xs text-destructive">
+                                        No funds available. Record member transactions first.
+                                    </p>
+                                </div>
+                            )}
+                        </div>
+
                         {success && (
                             <div className="mb-6 p-4 bg-secondary/10 text-secondary rounded-xl flex items-center gap-2 animate-fade-in">
                                 <CheckCircle2 size={20} />
@@ -128,7 +172,7 @@ export default function FSHandover() {
                             <Button
                                 type="submit"
                                 className="w-full"
-                                disabled={isSubmitting}
+                                disabled={isSubmitting || (cashBalance || 0) === 0}
                             >
                                 {isSubmitting ? <Loader2 className="animate-spin" size={20} /> : 'Record Handover'}
                             </Button>

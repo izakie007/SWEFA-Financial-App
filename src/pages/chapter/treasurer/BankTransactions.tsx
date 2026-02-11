@@ -5,12 +5,12 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../../../lib/supabase';
 import { useAuth } from '../../../hooks/useAuth';
 import { DashboardLayout } from '../../../components/layout/DashboardLayout';
-import { BarChart3, CheckCircle2, Landmark, ArrowRightLeft, FileSpreadsheet, Loader2, ArrowUpRight, ArrowDownLeft } from 'lucide-react';
+import { BarChart3, CheckCircle2, Landmark, ArrowRightLeft, FileSpreadsheet, Loader2, ArrowUpRight, ArrowDownLeft, Wallet } from 'lucide-react';
 import { Card, CardContent, Table, TableHeader, TableRow, TableHeaderCell, TableCell } from '../../../components/ui/DataDisplay';
 import { Button } from '../../../components/ui/Button';
 import { Combobox } from '../../../components/ui/Combobox';
 import { formatCurrency } from '../../../lib/formatters';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 
 const navItems = [
     { label: 'Dashboard', path: '/chapter/treasurer', icon: BarChart3 },
@@ -20,20 +20,57 @@ const navItems = [
     { label: 'Reports', path: '/chapter/treasurer/reports', icon: FileSpreadsheet },
 ];
 
-const bankSchema = z.object({
+const createBankSchema = (cashBalance: number, bankBalance: number, transactionType: string) => z.object({
     purpose_id: z.string().uuid('Please select a purpose'),
-    amount: z.number().min(1, 'Amount must be greater than 0'),
+    amount: z.number()
+        .min(1, 'Amount must be greater than 0')
+        .refine((val) => {
+            if (transactionType === 'DEPOSIT') {
+                return val <= cashBalance;
+            } else if (transactionType === 'WITHDRAWAL') {
+                return val <= bankBalance;
+            }
+            return true;
+        }, {
+            message: transactionType === 'DEPOSIT'
+                ? `Insufficient cash. Available: ${new Intl.NumberFormat('en-CM').format(cashBalance)} XAF`
+                : `Insufficient bank balance. Available: ${new Intl.NumberFormat('en-CM').format(bankBalance)} XAF`
+        }),
     transaction_type: z.enum(['DEPOSIT', 'WITHDRAWAL']),
     transaction_date: z.string(),
     reference_number: z.string().optional(),
 });
 
-type BankFormValues = z.infer<typeof bankSchema>;
+type BankFormValues = {
+    purpose_id: string;
+    amount: number;
+    transaction_type: 'DEPOSIT' | 'WITHDRAWAL';
+    transaction_date: string;
+    reference_number?: string;
+};
 
 export default function BankTransactions() {
     const { profile } = useAuth();
     const queryClient = useQueryClient();
     const [success, setSuccess] = useState(false);
+
+    // Fetch treasurer cash and bank balances
+    const { data: balances, isLoading: balanceLoading } = useQuery({
+        queryKey: ['treasurer-balances', profile?.chapter_id],
+        queryFn: async () => {
+            const { data, error } = await supabase
+                .from('v_chapter_cash_position')
+                .select('treasurer_cash_balance, bank_balance')
+                .eq('chapter_id', profile?.chapter_id)
+                .single();
+            if (error) throw error;
+            return {
+                cash: data?.treasurer_cash_balance || 0,
+                bank: data?.bank_balance || 0
+            };
+        },
+        enabled: !!profile?.chapter_id,
+    });
 
     // Fetch purposes
     const { data: purposes } = useQuery({
@@ -60,13 +97,29 @@ export default function BankTransactions() {
         enabled: !!profile?.chapter_id,
     });
 
+    const [currentTransactionType, setCurrentTransactionType] = useState<'DEPOSIT' | 'WITHDRAWAL'>('DEPOSIT');
+
     const { register, handleSubmit, reset, watch, control, formState: { errors, isSubmitting } } = useForm<BankFormValues>({
-        resolver: zodResolver(bankSchema),
+        resolver: zodResolver(createBankSchema(
+            balances?.cash || 0,
+            balances?.bank || 0,
+            currentTransactionType
+        )),
         defaultValues: {
             transaction_type: 'DEPOSIT',
             transaction_date: new Date().toISOString().split('T')[0],
         }
     });
+
+    // Watch for transaction type changes
+    const transactionType = watch('transaction_type');
+
+    // Update current transaction type when form value changes
+    useEffect(() => {
+        if (transactionType) {
+            setCurrentTransactionType(transactionType);
+        }
+    }, [transactionType]);
 
     const mutation = useMutation({
         mutationFn: async (values: BankFormValues) => {
@@ -93,6 +146,37 @@ export default function BankTransactions() {
                 <Card className="lg:col-span-1 h-fit">
                     <CardContent className="p-8">
                         <h3 className="text-xl font-bold mb-6">Record Bank Transaction</h3>
+
+                        {/* Balance Display */}
+                        <div className="mb-6 grid grid-cols-2 gap-3">
+                            <div className="p-3 bg-primary/5 border border-primary/20 rounded-xl">
+                                <div className="flex items-center gap-1 mb-1">
+                                    <Wallet size={14} className="text-primary" />
+                                    <span className="text-[10px] font-semibold text-muted-foreground uppercase">Cash</span>
+                                </div>
+                                {balanceLoading ? (
+                                    <div className="h-6 bg-muted animate-pulse rounded w-20" />
+                                ) : (
+                                    <p className="text-lg font-black text-primary">
+                                        {formatCurrency(balances?.cash || 0)}
+                                    </p>
+                                )}
+                            </div>
+                            <div className="p-3 bg-secondary/5 border border-secondary/20 rounded-xl">
+                                <div className="flex items-center gap-1 mb-1">
+                                    <Landmark size={14} className="text-secondary" />
+                                    <span className="text-[10px] font-semibold text-muted-foreground uppercase">Bank</span>
+                                </div>
+                                {balanceLoading ? (
+                                    <div className="h-6 bg-muted animate-pulse rounded w-20" />
+                                ) : (
+                                    <p className="text-lg font-black text-secondary">
+                                        {formatCurrency(balances?.bank || 0)}
+                                    </p>
+                                )}
+                            </div>
+                        </div>
+
                         {success && (
                             <div className="mb-6 p-4 bg-secondary/10 text-secondary rounded-xl text-sm font-semibold text-center">
                                 Record saved successfully!

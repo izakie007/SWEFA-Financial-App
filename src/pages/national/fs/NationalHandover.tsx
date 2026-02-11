@@ -11,7 +11,9 @@ import {
     History,
     FileText,
     Loader2,
-    Users
+    Users,
+    Wallet,
+    AlertCircle
 } from 'lucide-react';
 import { Card, CardContent, Table, TableHeader, TableRow, TableHeaderCell, TableCell } from '../../../components/ui/DataDisplay';
 import { Button } from '../../../components/ui/Button';
@@ -27,17 +29,35 @@ const navItems = [
     { label: 'Reports', path: '/national/fs/reports', icon: FileText },
 ];
 
-const handoverSchema = z.object({
+const createHandoverSchema = (maxAmount: number) => z.object({
     purpose_id: z.string().uuid('Please select a purpose'),
-    amount: z.number().min(1, 'Amount must be greater than 0'),
+    amount: z.number()
+        .min(1, 'Amount must be greater than 0')
+        .max(maxAmount, `Insufficient funds. Available: ${new Intl.NumberFormat('en-CM').format(maxAmount)} XAF`),
 });
 
-type HandoverFormValues = z.infer<typeof handoverSchema>;
+type HandoverFormValues = {
+    purpose_id: string;
+    amount: number;
+};
 
 export default function NationalHandover() {
     const { profile } = useAuth();
     const queryClient = useQueryClient();
     const [success, setSuccess] = useState(false);
+
+    // Fetch National FS Cash Balance
+    const { data: cashBalance, isLoading: balanceLoading } = useQuery({
+        queryKey: ['national-fs-cash-balance'],
+        queryFn: async () => {
+            const { data, error } = await supabase
+                .from('v_national_cash_position')
+                .select('fs_cash_balance')
+                .single();
+            if (error) throw error;
+            return data?.fs_cash_balance || 0;
+        },
+    });
 
     // Fetch active purposes
     const { data: purposes } = useQuery({
@@ -66,7 +86,7 @@ export default function NationalHandover() {
     });
 
     const { register, handleSubmit, reset, control, formState: { errors, isSubmitting } } = useForm<HandoverFormValues>({
-        resolver: zodResolver(handoverSchema),
+        resolver: zodResolver(createHandoverSchema(cashBalance || 0)),
     });
 
     const mutation = useMutation({
@@ -98,6 +118,30 @@ export default function NationalHandover() {
                                 National handover recorded!
                             </div>
                         )}
+
+                        {/* Cash Balance Display */}
+                        <div className="mb-6 p-4 bg-primary/5 border border-primary/20 rounded-xl">
+                            <div className="flex items-center gap-2 mb-2">
+                                <Wallet size={18} className="text-primary" />
+                                <span className="text-sm font-semibold text-muted-foreground">Available Cash</span>
+                            </div>
+                            {balanceLoading ? (
+                                <div className="h-8 bg-muted animate-pulse rounded w-32" />
+                            ) : (
+                                <p className="text-2xl font-black text-primary">
+                                    {formatCurrency(cashBalance || 0)}
+                                </p>
+                            )}
+                            {cashBalance === 0 && (
+                                <div className="mt-3 p-2 bg-destructive/10 border border-destructive/20 rounded-lg flex items-start gap-2">
+                                    <AlertCircle size={16} className="text-destructive mt-0.5" />
+                                    <p className="text-xs text-destructive">
+                                        No funds available.
+                                    </p>
+                                </div>
+                            )}
+                        </div>
+
                         <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
                             <div className="space-y-4">
                                 <Controller
@@ -125,7 +169,7 @@ export default function NationalHandover() {
                                 />
                                 {errors.amount && <p className="text-destructive text-xs">{errors.amount.message}</p>}
                             </div>
-                            <Button type="submit" className="w-full" disabled={isSubmitting}>
+                            <Button type="submit" className="w-full" disabled={isSubmitting || (cashBalance || 0) === 0}>
                                 {isSubmitting ? <Loader2 className="animate-spin" size={24} /> : 'Record Handover'}
                             </Button>
                         </form>
