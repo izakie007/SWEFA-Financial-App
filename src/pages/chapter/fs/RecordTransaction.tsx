@@ -22,8 +22,8 @@ const navItems = [
 ];
 
 const transactionSchema = z.object({
-    member_id: z.string().uuid('Please select a member'),
-    purpose_id: z.string().uuid('Please select a purpose'),
+    member_id: z.uuid('Please select a member'),
+    purpose_id: z.uuid('Please select a purpose'),
     amount: z.number().min(1, 'Amount must be greater than 0'),
     transaction_type: z.enum(['COLLECTION', 'DISBURSEMENT']),
     destination: z.enum(['CHAPTER', 'NATIONAL']),
@@ -50,7 +50,10 @@ export default function RecordTransaction() {
                 console.error('Error fetching members:', error);
                 return [];
             }
-            return data?.map(m => ({ id: m.id, label: `${m.full_name} (${m.membership_number || 'N/A'})` })) || [];
+            return data?.map(m => ({
+                id: m.id,
+                label: `${m.full_name || 'Unknown'} (${m.membership_number || 'N/A'})`
+            })) || [];
         },
         enabled: !!profile?.chapter_id,
     });
@@ -69,7 +72,7 @@ export default function RecordTransaction() {
             }
             return data?.map(p => ({
                 id: p.id,
-                label: `${p.name} ${p.expected_amount ? `(${formatCurrency(p.expected_amount)})` : ''}`
+                label: `${p.name || 'Unknown Purpose'} ${p.expected_amount ? `(${formatCurrency(p.expected_amount)})` : ''}`
             })) || [];
         },
     });

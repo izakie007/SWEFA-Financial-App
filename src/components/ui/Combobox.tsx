@@ -34,7 +34,7 @@ export function Combobox({
     const selectedOption = options.find(opt => opt.id === value);
 
     const filteredOptions = options.filter(opt =>
-        opt.label.toLowerCase().includes(searchTerm.toLowerCase())
+        opt.label?.toLowerCase().includes(searchTerm.toLowerCase())
     );
 
     useEffect(() => {
