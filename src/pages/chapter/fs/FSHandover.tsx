@@ -42,7 +42,7 @@ export default function FSHandover() {
                 .select('id, name')
                 .eq('is_active', true);
             if (error) throw error;
-            return data?.map(p => ({ id: p.id, label: p.name })) || [];
+            return data?.map(p => ({ id: p.id, label: p.name || 'Unknown Purpose' })) || [];
         },
     });
 

@@ -41,7 +41,7 @@ export default function BankTransactions() {
         queryFn: async () => {
             const { data, error } = await supabase.from('purposes').select('id, name').eq('is_active', true);
             if (error) throw error;
-            return data?.map(p => ({ id: p.id, label: p.name })) || [];
+            return data?.map(p => ({ id: p.id, label: p.name || 'Unknown Purpose' })) || [];
         },
     });
 

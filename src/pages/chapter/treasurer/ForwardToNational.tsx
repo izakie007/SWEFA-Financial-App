@@ -52,7 +52,7 @@ export default function ForwardToNational() {
                 .eq('is_active', true)
                 .eq('level', 'NATIONAL');
             if (error) throw error;
-            return data?.map(p => ({ id: p.id, label: p.name })) || [];
+            return data?.map(p => ({ id: p.id, label: p.name || 'Unknown Purpose' })) || [];
         },
     });
 
